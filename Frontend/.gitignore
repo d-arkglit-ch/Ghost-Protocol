@@ -1,0 +1,35 @@
+# ───────────────── 🏗️ BUILD/DIST ────────────────
+# These are generated when you run 'npm run build'
+dist/
+dist-ssr/
+*.jag
+*.local
+
+# ───────────────── 🛡️ SECURITY ─────────────────
+# Never commit your local API keys or config secrets!
+.env
+.env.local
+.env.*.local
+
+# ───────────────── 📦 DEPENDENCIES ───────────────
+node_modules/
+
+# ───────────────── 📁 LOGS & DEBUG ───────────────
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ───────────────── 💻 OS & EDITORS ───────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
