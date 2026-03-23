@@ -1,5 +1,9 @@
 # Ghost Protocol: Real-Time Burner Chat
 
+[![MERN Stack](https://img.shields.io/badge/Stack-MERN-blue?style=for-the-badge)](https://mongodb.com)
+[![Socket.io](https://img.shields.io/badge/RealTime-Socket.io-green?style=for-the-badge)](https://socket.io)
+[![Security](https://img.shields.io/badge/Privacy-AutoCleanup-red?style=for-the-badge)](#)
+
 Ghost Protocol is a high-performance, anonymity-first chat application designed for ephemeral communication. Whether it's a timed "Burner Room" or a random "Stranger Match," Ghost Protocol ensures data remains private and connections stay fast.
 
 ---
