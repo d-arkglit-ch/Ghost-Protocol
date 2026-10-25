@@ -5,14 +5,14 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { Room } from "../models/roomModel.js";
 const getMessages = asyncHandler(async(req , res)=>{
     const {roomCode}= req.params;
-    const room =await Room.findOne({code:roomCode});
+    const room = await Room.findOne({ code: roomCode }).select("_id members").lean();
     if(!room){
         throw new ApiError(404 , "Room Not Found");
     }
     const userId = req.user._id;
     const isMember = room.members?.some((m) => m.toString() === userId.toString());
     if(!isMember){
-      throw new ApiError(403 , "You are not a member of this room");
+      await Room.findByIdAndUpdate(room._id, { $addToSet: { members: userId } });
     }
     
     const limit = 50;
@@ -27,7 +27,8 @@ const getMessages = asyncHandler(async(req , res)=>{
     const messages = await Message.find(query)
       .sort({ _id: -1 })
       .limit(limit)
-      .populate("user_id" , "username avatar_url");
+      .populate("user_id" , "username avatar_url")
+      .lean();
 
     // Reverse them to restore chronological order (oldest -> newest) for the frontend
     messages.reverse();

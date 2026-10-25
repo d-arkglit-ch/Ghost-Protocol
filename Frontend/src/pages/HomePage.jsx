@@ -31,11 +31,18 @@ const HomePage = () => {
     return () => {
       socket.off("waitingForStranger");
       socket.off("strangerMatched");
+      socket.emit("cancelFindStranger");
     };
   }, [socket, navigate, fetchRooms]);
 
   const handleFindStranger = () => {
     if (!socket) return;
+    if (isSearching) {
+      socket.emit("cancelFindStranger");
+      setIsSearching(false);
+      setSearchMessage("");
+      return;
+    }
     setIsSearching(true);
     setSearchMessage("INITIALIZING_SEARCH_PROTOCOL...");
     socket.emit("findStranger");
@@ -66,10 +73,9 @@ const HomePage = () => {
           </Link>
           <button 
             onClick={handleFindStranger} 
-            disabled={isSearching}
             className={`btn-terminal text-center py-4 ${isSearching ? 'glitch-anim border-[var(--accent-color)]' : ''}`}
           >
-            {isSearching ? searchMessage : "[?] OMEGLE_MODE (FIND_STRANGER)"}
+            {isSearching ? `${searchMessage} [CANCEL]` : "[?] OMEGLE_MODE (FIND_STRANGER)"}
           </button>
         </div>
 

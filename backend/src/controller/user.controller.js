@@ -23,6 +23,15 @@ const generateAccessAndRefreshToken = async (user) => {
   }
 };
 
+const getCookieOptions = () => {
+  const isProduction = process.env.NODE_ENV === "production";
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+  };
+};
+
 const registerUser = asyncHandler(async (req, res) => {
   //get password and username from the request body
   const {username,password} = req.body;
@@ -57,15 +66,11 @@ const registerUser = asyncHandler(async (req, res) => {
   // Auto-login: generate tokens so user is immediately authenticated
   const { refreshToken, accessToken } = await generateAccessAndRefreshToken(user);
 
-  const createdUser = await User.findById(user._id).select(
-    "-password_hash -refreshToken"
-  );
+  const createdUser = await User.findById(user._id)
+    .select("-password_hash -refreshToken")
+    .lean();
 
-  const option = {
-    httpOnly: true,
-    secure: true,
-    sameSite: "none",
-  };
+  const option = getCookieOptions();
 
   return res
     .status(201)
@@ -96,15 +101,11 @@ const loginUser = asyncHandler(async (req, res) => {
   await User.findByIdAndUpdate(user._id, { lastActive: Date.now() });
 
   //removing the password and referesh token
-  const loggedUser = await User.findById(user._id).select(
-    "-refreshToken -password_hash"
-  );
+  const loggedUser = await User.findById(user._id)
+    .select("-refreshToken -password_hash")
+    .lean();
 
-  const option = {
-    httpOnly: true,
-    secure: true,
-    sameSite: "none",
-  };
+  const option = getCookieOptions();
 
   return res
     .status(200)
@@ -128,11 +129,7 @@ const logoutUser = asyncHandler(async(req, res)=>{
     await User.findByIdAndUpdate(userId, { $unset: { refreshToken: 1 } });
   }
 
-const option={
-httpOnly:true,
-secure: true,
-sameSite: "none",
-}
+  const option = getCookieOptions();
 
 res
 .clearCookie("accessToken" , option)
@@ -142,6 +139,25 @@ res
 })
 
 const loginGuest = asyncHandler(async (req, res) => {
+  // If the browser already has an active session cookie, reuse it across tabs
+  const existingToken = req.cookies?.accessToken;
+  if (existingToken) {
+    try {
+      const decoded = jwt.verify(existingToken, process.env.ACCESS_TOKEN_SECRET);
+      const existingUser = await User.findById(decoded._id)
+        .select("-refreshToken -password_hash")
+        .lean();
+      if (existingUser) {
+        await User.findByIdAndUpdate(existingUser._id, { lastActive: Date.now() });
+        return res
+          .status(200)
+          .json(new ApiResponse(200, existingUser, "Resumed existing active session"));
+      }
+    } catch {
+      // Token expired or invalid, continue below to generate fresh guest
+    }
+  }
+
   // Generate a random guest username
   const guestNumber = Math.floor(1000 + Math.random() * 9000); // 4 digit number
   const username = `Guest_${guestNumber}`;
@@ -158,15 +174,11 @@ const loginGuest = asyncHandler(async (req, res) => {
 
   const { refreshToken, accessToken } = await generateAccessAndRefreshToken(user);
 
-  const loggedUser = await User.findById(user._id).select(
-    "-refreshToken -password_hash"
-  );
+  const loggedUser = await User.findById(user._id)
+    .select("-refreshToken -password_hash")
+    .lean();
 
-  const option = {
-    httpOnly: true,
-    secure: true,
-    sameSite: "none",
-  };
+  const option = getCookieOptions();
 
   return res
     .status(200)
@@ -180,7 +192,9 @@ const getProfile = asyncHandler(async (req, res) => {
     throw new ApiError(401, "Not authorized");
   }
   
-  const user = await User.findById(req.user._id).select("-password_hash -refreshToken");
+  const user = await User.findById(req.user._id)
+    .select("-password_hash -refreshToken")
+    .lean();
   
   if (!user) {
     throw new ApiError(404, "User not found");

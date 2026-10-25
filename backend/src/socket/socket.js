@@ -43,6 +43,23 @@ throw new ApiError(401 , "Unauthorized")
 
   let waitingQueue = [];
 
+  // Liveness safeguard probe with timeout
+  const isSocketAlive = async (candSocket) => {
+    try {
+      if (!candSocket || !candSocket.connected || candSocket.disconnected) return false;
+      if (!io.sockets.sockets.has(candSocket.id)) return false;
+      if (candSocket.conn?.readyState !== "open") return false;
+
+      const res = await candSocket.timeout(1200).emitWithAck("pingCheck");
+      return res?.status === "alive";
+    } catch {
+      return false;
+    }
+  };
+
+  // Omegle Disconnect Grace Period Tracker (roomCode -> timeoutId)
+  const pendingOmegleDisconnects = new Map();
+
   // Helper function to generate a room code (copied from room controller concept)
   const generateSecureRandomString = (length) => {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -68,13 +85,24 @@ throw new ApiError(401 , "Unauthorized")
         }
         const isMember = room.members?.some((m) => m.toString() === userId.toString());
         if(!isMember){
-          throw new ApiError(403 , "You are not a member of this room")
+          room.members.push(userId);
+          await room.save();
         }
         socket.join(roomCode);
         
         // Cache verified room IDs in socket memory to bypass DB later
         if (!socket.verifiedRooms) socket.verifiedRooms = new Map();
         socket.verifiedRooms.set(roomCode, room._id);
+
+        // Cancel pending grace period if reconnecting
+        if (pendingOmegleDisconnects.has(roomCode)) {
+          clearTimeout(pendingOmegleDisconnects.get(roomCode));
+          pendingOmegleDisconnects.delete(roomCode);
+          socket.to(roomCode).emit("strangerReconnected", {
+            message: "Stranger reconnected.",
+          });
+          console.log(`⚡ Cancelled grace period for Omegle room ${roomCode} (user reconnected)`);
+        }
 
         console.log(`✅ socket ${socket.id} joined room ${roomCode}`);
       } catch (error) {
@@ -94,10 +122,21 @@ throw new ApiError(401 , "Unauthorized")
           throw new ApiError(400 , "Message content is required")
         }
 
-        // Memory Check! (Zero DB calls)
-        const roomId = socket.verifiedRooms?.get(roomCode);
+        // Check memory cache first, or self-heal fallback to DB
+        let roomId = socket.verifiedRooms?.get(roomCode);
         if(!roomId){
-          throw new ApiError(403 , "You are not a verified member of this room")
+          const room = await Room.findOne({ code: roomCode });
+          if(!room){
+            throw new ApiError(404 , "Room not found");
+          }
+          if(!room.members?.some((m) => m.toString() === socket.user._id.toString())){
+            room.members.push(socket.user._id);
+            await room.save();
+          }
+          socket.join(roomCode);
+          if (!socket.verifiedRooms) socket.verifiedRooms = new Map();
+          socket.verifiedRooms.set(roomCode, room._id);
+          roomId = room._id;
         }
 
         const newMessage = await Message.create({
@@ -107,12 +146,21 @@ throw new ApiError(401 , "Unauthorized")
           media_url: message?.mediaUrl || null,
         });
 
-        const populatedMessage = await Message.findById(newMessage._id).populate(
-          "user_id",
-          "username avatar_url"
-        );
+        // Zero-DB-overhead payload assembly with clean string IDs
+        const populatedMessage = {
+          _id: newMessage._id.toString(),
+          room_id: roomId.toString(),
+          content: newMessage.content,
+          media_url: newMessage.media_url || null,
+          createdAt: newMessage.createdAt || new Date().toISOString(),
+          user_id: {
+            _id: socket.user._id.toString(),
+            username: socket.user.username,
+            avatar_url: socket.user.avatar_url || null,
+          },
+        };
 
-        io.to(roomCode).emit("receiveMessage" , populatedMessage);
+        io.to(roomCode).emit("receiveMessage", populatedMessage);
 
         // Fire and forget updating the room's last_active
         Room.findByIdAndUpdate(roomId, { last_active: Date.now() }).exec();
@@ -121,20 +169,50 @@ throw new ApiError(401 , "Unauthorized")
       }
     });
 
+    socket.on("cancelFindStranger", () => {
+      waitingQueue = waitingQueue.filter(
+        (item) => item.socketId !== socket.id && item.userId !== socket.user?._id?.toString()
+      );
+      console.log(`User ${socket.user.username} cancelled search`);
+    });
+
     socket.on("findStranger", async () => {
       try {
         console.log(`User ${socket.user.username} is looking for a stranger`);
         
-        // Remove self from queue if already in it (prevent duplicates)
-        waitingQueue = waitingQueue.filter(s => s.id !== socket.id && s.connected);
+        // Remove self from queue if already in it (prevent duplicates and self-pairing)
+        waitingQueue = waitingQueue.filter(
+          (item) => item.socketId !== socket.id && item.userId !== socket.user?._id?.toString()
+        );
 
-        // Find the first valid waiting user
+        // Find the first valid alive waiting user using lightweight descriptor
         let matchedSocket = null;
         while (waitingQueue.length > 0) {
-          const candidate = waitingQueue.shift();
-          if (candidate.connected && candidate.id !== socket.id) {
-            matchedSocket = candidate;
+          const candidateItem = waitingQueue.shift();
+
+          // Skip self or invalid candidate
+          if (
+            !candidateItem ||
+            candidateItem.socketId === socket.id ||
+            candidateItem.userId === socket.user?._id?.toString()
+          ) {
+            continue;
+          }
+
+          // Retrieve live socket instance on demand
+          const candidateSocket = io.sockets.sockets.get(candidateItem.socketId);
+          if (!candidateSocket || !candidateSocket.connected) {
+            console.log(`⚠️ Pruned disconnected socket descriptor: ${candidateItem.socketId}`);
+            continue;
+          }
+
+          // Active ping/pong safeguard verification
+          const alive = await isSocketAlive(candidateSocket);
+          if (alive) {
+            matchedSocket = candidateSocket;
             break;
+          } else {
+            console.log(`⚠️ Pruned inactive/zombie socket: ${candidateItem.socketId}`);
           }
         }
 
@@ -162,8 +240,12 @@ throw new ApiError(401 , "Unauthorized")
           matchedSocket.emit("strangerMatched", { roomCode: room.code });
           socket.emit("strangerMatched", { roomCode: room.code });
         } else {
-          // No one is waiting, so this user joins the queue
-          waitingQueue.push(socket);
+          // No one is waiting, push lightweight descriptor instead of full socket
+          waitingQueue.push({
+            socketId: socket.id,
+            userId: socket.user._id.toString(),
+            username: socket.user.username,
+          });
           socket.emit("waitingForStranger", { message: "Looking for someone..." });
         }
 
@@ -172,9 +254,14 @@ throw new ApiError(401 , "Unauthorized")
       }
     });
 
-    // Leave omegle room — deletes room & notifies the other user
+    // Leave omegle room — deletes room & notifies the other user immediately (no grace period when manually leaving)
     socket.on("leaveOmegleRoom", async (roomCode) => {
       try {
+        if (pendingOmegleDisconnects.has(roomCode)) {
+          clearTimeout(pendingOmegleDisconnects.get(roomCode));
+          pendingOmegleDisconnects.delete(roomCode);
+        }
+
         const room = await Room.findOne({ code: roomCode });
         if (!room) return;
 
@@ -207,9 +294,11 @@ throw new ApiError(401 , "Unauthorized")
       }
       console.log("❌ User disconnected:", socket.id);
       // Remove from queue if they disconnect while waiting
-      waitingQueue = waitingQueue.filter(s => s.id !== socket.id);
+      waitingQueue = waitingQueue.filter(
+        (item) => item.socketId !== socket.id && item.userId !== socket.user?._id?.toString()
+      );
 
-      // Clean up any omegle rooms this user was in
+      // Clean up any omegle rooms this user was in (with a 10s grace period for brief refreshes/reconnects)
       try {
         const omegleRooms = await Room.find({ 
           members: socket.user._id, 
@@ -217,15 +306,32 @@ throw new ApiError(401 , "Unauthorized")
         });
         
         for (const room of omegleRooms) {
-          // Notify other users in the room
-          socket.to(room.code).emit("roomClosed", { message: "Stranger has disconnected." });
-          // Delete messages and room
-          await Message.deleteMany({ room_id: room._id });
-          await Room.findByIdAndDelete(room._id);
-          console.log(`🗑️ Auto-deleted omegle room ${room.code} on disconnect`);
+          if (pendingOmegleDisconnects.has(room.code)) continue;
+
+          // Alert other user that peer is reconnecting
+          socket.to(room.code).emit("strangerReconnecting", {
+            countdown: 10,
+            message: "Stranger connection lost. Waiting 10s to reconnect...",
+          });
+
+          console.log(`⏳ [OMEGLE] Started 10s grace period for room ${room.code}`);
+
+          const graceTimer = setTimeout(async () => {
+            try {
+              pendingOmegleDisconnects.delete(room.code);
+              io.to(room.code).emit("roomClosed", { message: "Stranger disconnected." });
+              await Message.deleteMany({ room_id: room._id });
+              await Room.findByIdAndDelete(room._id);
+              console.log(`🗑️ [OMEGLE] Grace period expired: Purged room ${room.code}`);
+            } catch (err) {
+              console.error("Error purging omegle room after grace period:", err);
+            }
+          }, 10000);
+
+          pendingOmegleDisconnects.set(room.code, graceTimer);
         }
       } catch (err) {
-        console.error("Error cleaning up omegle rooms on disconnect:", err);
+        console.error("Error managing omegle disconnect grace period:", err);
       }
     });
   });

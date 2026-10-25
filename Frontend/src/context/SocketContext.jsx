@@ -25,6 +25,13 @@ import { useAuth } from "./AuthContext";
             console.log("socket disconnected");
         });
 
+        // Matchmaking liveness probe response
+        newSocket.on("pingCheck", (callback) => {
+            if (typeof callback === "function") {
+                callback({ status: "alive" });
+            }
+        });
+
 //clean up function
 
         return()=>{

@@ -18,7 +18,7 @@ const createRoom = asyncHandler(async (req, res) => {
     throw new ApiError(400, "code is not present");
   }
 
-  const roomPresent = await Room.findOne({ code });
+  const roomPresent = await Room.findOne({ code }).select("_id").lean();
   if (roomPresent) {
     throw new ApiError(
       400,
@@ -62,7 +62,9 @@ const joinRoom = asyncHandler(async (req, res) => {
 
 const getRoom = asyncHandler(async (req, res) => {
   const userId = req.user._id;
-  const rooms = await Room.find({ members: userId }).populate("members", "avatar_url username");
+  const rooms = await Room.find({ members: userId })
+    .populate("members", "avatar_url username")
+    .lean();
 
   return res.status(200).json(new ApiResponse(200, rooms, "fetched user room"));
 });
@@ -71,7 +73,7 @@ const getRoom = asyncHandler(async (req, res) => {
 const deleteRoom =asyncHandler(async(req, res)=>{
   const {roomCode}= req.params;
   const userId = req.user._id;
-  const room  = await Room.findOne({code:roomCode});
+  const room = await Room.findOne({ code: roomCode }).select("_id created_by").lean();
   if(!room){
     throw new ApiError(404 , "room not found");
   }

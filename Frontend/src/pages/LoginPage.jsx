@@ -1,12 +1,19 @@
-import { Link } from "react-router-dom";
-import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 
 const LoginPage = () => {
   const [form, setForm] = useState({ username: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const { loginUser } = useAuth();
+  const { user, loading: authLoading, loginUser } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user && !authLoading) {
+      navigate("/rooms");
+    }
+  }, [user, authLoading, navigate]);
 
   const handleChange = (e) =>
     setForm({ ...form, [e.target.name]: e.target.value });

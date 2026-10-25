@@ -1,11 +1,12 @@
-import { useState } from "react";
-import { useMessages } from "../../context/MessagContext";
+import { useState, useRef } from "react";
+import { useMessages } from "../../context/MessageContext";
 import { useSocket } from "../../context/SocketContext";
 
 const MessageInput = ({ roomCode }) => {
   const [text, setText] = useState("");
   const { handleSendMessage } = useMessages();
   const { socket } = useSocket();
+  const lastTypingTime = useRef(0);
 
   const send = async () => {
     if (!text.trim()) return;
@@ -16,8 +17,11 @@ const MessageInput = ({ roomCode }) => {
   const handleKeyDown = (e) => {
     if (e.key === "Enter") {
       send();
-    } else if (socket && e.key.length === 1) { // Only emit printable characters
-      socket.emit("typing", { roomCode, key: e.key });
+    } else if (socket && e.key.length === 1) {
+      if (Date.now() - lastTypingTime.current > 1500) {
+        lastTypingTime.current = Date.now();
+        socket.emit("typing", { roomCode, key: e.key });
+      }
     }
   };
 

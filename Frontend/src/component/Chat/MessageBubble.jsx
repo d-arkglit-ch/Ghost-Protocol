@@ -1,13 +1,18 @@
-const MessageBubble = ({ msg, isOwn }) => {
-  const timeString = new Date(msg.createdAt).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+import { memo } from "react";
+
+const MessageBubble = memo(({ msg, isOwn }) => {
+  const dateObj = msg?.createdAt ? new Date(msg.createdAt) : new Date();
+  const timeString = !isNaN(dateObj.getTime())
+    ? dateObj.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  const username = msg?.user_id?.username || "ANON";
+  const text = msg?.content || msg?.message || msg?.text || "";
 
   return (
     <div className={`flex flex-col w-full mb-4 ${isOwn ? "items-end" : "items-start"}`}>
       <div className="text-xs opacity-50 mb-1 uppercase tracking-wider">
-        {isOwn ? "YOU" : `> ${msg.user_id?.username || "ANON"}`} [{timeString}]
+        {isOwn ? "YOU" : `> ${username}`} [{timeString}]
       </div>
 
       <div 
@@ -17,10 +22,12 @@ const MessageBubble = ({ msg, isOwn }) => {
             : "bg-[var(--bg-color)] text-[var(--text-color)]"
         }`}
       >
-        {msg.content}
+        {text}
       </div>
     </div>
   );
-};
+});
+
+MessageBubble.displayName = "MessageBubble";
 
 export default MessageBubble;

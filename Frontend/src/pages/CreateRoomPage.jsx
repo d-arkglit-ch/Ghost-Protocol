@@ -43,15 +43,42 @@ const CreateRoomPage = () => {
         )}
 
         <div className="flex flex-col gap-2">
-          <label className="text-xs opacity-70">SELF_DESTRUCT_TIMER (MINUTES) [OPTIONAL]:</label>
+          <label className="text-xs opacity-70">SELF_DESTRUCT_PRESETS:</label>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: "15 MIN", val: 15 },
+              { label: "1 HOUR", val: 60 },
+              { label: "24 HOURS", val: 1440 },
+            ].map((preset) => (
+              <button
+                key={preset.val}
+                type="button"
+                onClick={() => setTimerMinutes(timerMinutes === String(preset.val) ? "" : String(preset.val))}
+                className={`py-2 text-xs border font-mono tracking-wider transition-colors ${
+                  timerMinutes === String(preset.val)
+                    ? "bg-[var(--text-color)] text-[var(--bg-color)] border-[var(--text-color)]"
+                    : "border-[var(--border-color)] hover:border-[var(--text-color)]"
+                }`}
+              >
+                [{preset.label}]
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <label className="text-xs opacity-70">CUSTOM_TIMER (MINUTES) [OPTIONAL]:</label>
           <input 
             type="number" 
             className="input-terminal" 
-            placeholder="e.g. 60 (for 1 hour)"
+            placeholder="e.g. 45 (or select a preset above)"
             value={timerMinutes}
             onChange={(e) => setTimerMinutes(e.target.value)}
             min="1"
           />
+          <p className="text-[10px] opacity-50 uppercase mt-1">
+            // IDLE POLICY: ROOMS WITH ZERO ACTIVITY FOR &gt;2 HOURS ARE AUTOMATICALLY PURGED.
+          </p>
         </div>
 
         <button

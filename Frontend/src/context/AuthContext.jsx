@@ -10,25 +10,56 @@ export const AuthProvider = ({ children }) => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
 
+  const restoreSession = async () => {
+    try {
+      const { parsed } = await apiGetProfile();
+      setUser(parsed.data);
+      return parsed.data;
+    } catch {
+      setUser(null);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Rehydrate session from cookie on mount/refresh
   useEffect(() => {
-    const restoreSession = async () => {
-      try {
-        const { parsed } = await apiGetProfile();
-        setUser(parsed.data);
-      } catch {
-        setUser(null);
-      } finally {
-        setLoading(false);
+    restoreSession();
+
+    // Cross-tab synchronization listener
+    const handleStorageChange = (e) => {
+      if (e.key === "ghost_session_sync" && e.newValue) {
+        try {
+          const payload = JSON.parse(e.newValue);
+          if (payload.action === "LOGIN") {
+            restoreSession();
+          } else if (payload.action === "LOGOUT") {
+            setUser(null);
+            navigate("/login");
+          }
+        } catch {
+          // ignore parsing error
+        }
       }
     };
-    restoreSession();
-  }, []);
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [navigate]);
+
+  const broadcastSync = (action) => {
+    localStorage.setItem(
+      "ghost_session_sync",
+      JSON.stringify({ action, timestamp: Date.now() })
+    );
+  };
 
   // LOGIN
   const loginUser = async (credentials) => {
     const { parsed } = await apiLoginUser(credentials);
     setUser(parsed.data);
+    broadcastSync("LOGIN");
     navigate("/rooms");
   };
 
@@ -38,6 +69,7 @@ export const AuthProvider = ({ children }) => {
       setLoading(true);
       const { parsed } = await apiLoginGuest();
       setUser(parsed.data);
+      broadcastSync("LOGIN");
       navigate("/rooms");
     } finally {
       setLoading(false);
@@ -48,6 +80,7 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     await apiLogoutUser();
     setUser(null);
+    broadcastSync("LOGOUT");
     navigate("/login");
   };
 
@@ -55,6 +88,7 @@ export const AuthProvider = ({ children }) => {
   const register = async (credentials) => {
     const { parsed } = await apiRegisterUser(credentials);
     setUser(parsed.data);
+    broadcastSync("LOGIN");
     navigate("/rooms");
   };
 

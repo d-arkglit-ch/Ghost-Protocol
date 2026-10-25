@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 
 const SignupPage = () => {
@@ -13,8 +13,14 @@ const SignupPage = () => {
   const [loading, setLoading] = useState(false);
 
   // support either register OR registerUser from your context
-  const { register, registerUser } = useAuth();
+  const { user, loading: authLoading, register, registerUser } = useAuth();
   const doRegister = register || registerUser;
+
+  useEffect(() => {
+    if (user && !authLoading) {
+      navigate("/rooms");
+    }
+  }, [user, authLoading, navigate]);
 
   const handleChange = (e) =>
     setForm((p) => ({ ...p, [e.target.name]: e.target.value }));

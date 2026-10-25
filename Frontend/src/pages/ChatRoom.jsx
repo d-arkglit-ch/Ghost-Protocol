@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
-import { useMessages } from "../context/MessagContext";
+import { useMessages } from "../context/MessageContext";
 import { useRoom } from "../context/RoomContext";
 import { useAuth } from "../context/AuthContext";
 import { useSocket } from "../context/SocketContext";
@@ -21,6 +21,9 @@ const ChatRoom = () => {
   // Typing indicator state
   const [typingUser, setTypingUser] = useState("");
   const typingTimeoutRef = useRef(null);
+
+  // Omegle reconnection grace period status
+  const [reconnectingStatus, setReconnectingStatus] = useState("");
 
   // If rooms isn't loaded yet, it might be undefined.
   const room = rooms?.find((r) => r.code === roomCode);
@@ -58,6 +61,14 @@ const ChatRoom = () => {
         }, 2000);
       });
 
+      socket.on("strangerReconnecting", (data) => {
+        setReconnectingStatus(data?.message || "STRANGER CONNECTION INTERRUPTED. WAITING 10S TO RECONNECT...");
+      });
+
+      socket.on("strangerReconnected", () => {
+        setReconnectingStatus("");
+      });
+
       // Handle omegle room being closed by the other user
       socket.on("roomClosed", (data) => {
         alert(data?.message || "The stranger has left the chat.");
@@ -77,6 +88,8 @@ const ChatRoom = () => {
       if (socket) {
         socket.off("userTyping");
         socket.off("connect");
+        socket.off("strangerReconnecting");
+        socket.off("strangerReconnected");
         socket.off("roomClosed");
         socket.off("roomDeleted");
       }
@@ -161,6 +174,12 @@ const ChatRoom = () => {
       {/* CHAT CONTAINER */}
       <div className="flex-1 overflow-y-auto border border-[var(--border-color)] p-4 mb-4 flex flex-col gap-2 bg-[var(--bg-color)]">
         
+        {reconnectingStatus && (
+          <div className="border border-[var(--accent-color)] bg-[var(--accent-color)]/10 text-[var(--accent-color)] p-3 text-xs font-mono uppercase tracking-widest text-center animate-pulse mb-3">
+            [!] {reconnectingStatus}
+          </div>
+        )}
+
         <div className="text-center opacity-30 text-xs mb-4 border-b border-dashed border-[var(--border-color)] pb-2 uppercase">
           {isOmegle ? "--- STRANGER_CONNECTION_ESTABLISHED ---" : "--- CONNECTION_ESTABLISHED ---"}
         </div>
@@ -181,9 +200,17 @@ const ChatRoom = () => {
           </div>
         )}
 
-        {messages.map((msg, index) => (
-          <MessageBubble key={msg._id || index} msg={msg} isOwn={msg.user_id?._id === user?._id} />
-        ))}
+        {messages.map((msg, index) => {
+          const senderId = msg.user_id?._id || msg.user_id;
+          const isOwn = senderId && user?._id && senderId.toString() === user._id.toString();
+          return (
+            <MessageBubble 
+              key={msg._id || index} 
+              msg={msg} 
+              isOwn={Boolean(isOwn)} 
+            />
+          );
+        })}
 
         {/* Typing Indicator */}
         {typingUser && (
