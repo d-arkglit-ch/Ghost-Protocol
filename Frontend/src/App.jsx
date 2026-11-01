@@ -12,6 +12,7 @@ import ChatRoom from "./pages/ChatRoom.jsx";
 
 import { AppProvider } from "./context/index.jsx";
 import ProtectedRoute from "./component/Auth/ProtectedRoute.jsx";
+import AppLayout from "./component/Layout/AppLayout.jsx";
 
 function App() {
   return (
@@ -23,13 +24,47 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
 
-          {/* Auth Required Pages (Dashboard + Chat) */}
-          <Route path="/rooms" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
-          <Route path="/create-room" element={<ProtectedRoute><CreateRoomPage /></ProtectedRoute>} />
-          <Route path="/join-room" element={<ProtectedRoute><JoinRoomPage /></ProtectedRoute>} />
-
-          {/* Chat Room Page */}
-          <Route path="/room/:roomCode" element={<ProtectedRoute><ChatRoom /></ProtectedRoute>} />
+          {/* Auth Required Pages inside Adaptive Fullscreen Social Layout */}
+          <Route 
+            path="/rooms" 
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <HomePage />
+                </AppLayout>
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/create-room" 
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <CreateRoomPage />
+                </AppLayout>
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/join-room" 
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <JoinRoomPage />
+                </AppLayout>
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/room/:roomCode" 
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <ChatRoom />
+                </AppLayout>
+              </ProtectedRoute>
+            } 
+          />
         </Routes>
       </AppProvider>
     </Router>

@@ -1,6 +1,7 @@
 import { useRoom } from "../context/RoomContext";
 import { useNavigate, Link } from "react-router-dom";
 import { useState } from "react";
+import { Hash, ArrowLeft, ArrowRight, AlertCircle, ShieldCheck } from "lucide-react";
 
 const JoinRoomPage = () => {
   const { handleJoinRoom } = useRoom();
@@ -15,65 +16,84 @@ const JoinRoomPage = () => {
     setError("");
 
     if (!roomCode.trim()) {
-      return setError("ERROR: ROOM_ID_REQUIRED");
+      return setError("Please enter a room code");
     }
 
     try {
       setLoading(true);
-      const room = await handleJoinRoom(roomCode.trim());
+      const room = await handleJoinRoom(roomCode.trim().toUpperCase());
       navigate(`/room/${room.code}`);
     } catch (err) {
-      setError(err.message || "ERROR: INVALID_ROOM_HASH");
+      setError(err.message || "Invalid or expired room code");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="w-full max-w-md terminal-box flex flex-col gap-6">
-        <div className="border-b border-[var(--border-color)] pb-4 mb-2">
-          <h1 className="text-xl font-bold uppercase">
-           {'>'} CONNECT_TO_BURNER
-          </h1>
+    <div className="h-full overflow-y-auto flex items-center justify-center p-4 md:p-8 bg-[#F6F8F6] text-[#111827]">
+      <div className="w-full max-w-lg rounded-2xl p-6 md:p-8 bg-white border border-[#D5E0D7] shadow-sm flex flex-col gap-6">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-[#D5E0D7] pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#E4EDE6] text-[#1C4A2E] flex items-center justify-center">
+              <Hash className="w-5 h-5" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-[#111827]">Join with Code</h1>
+              <p className="text-xs text-[#526056]">Connect to an existing burner room</p>
+            </div>
+          </div>
+
+          <Link
+            to="/rooms"
+            className="p-1.5 rounded-lg border border-[#D5E0D7] text-[#526056] hover:text-[#111827] hover:bg-[#F0F4F1] transition-colors"
+            title="Cancel"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
         </div>
 
-        <p className="text-sm opacity-70">
-          // Enter the secure room hash provided by the host.
-        </p>
-
         {error && (
-          <div className="border border-[var(--accent-color)] text-[var(--accent-color)] p-2 text-xs font-bold uppercase glitch-anim">
-            {error}
+          <div className="bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-lg text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
-        <form onSubmit={joinRoomNow} className="flex flex-col gap-6">
-          <div className="flex flex-col gap-2">
-            <label className="text-xs opacity-70">ROOM_HASH_ID:</label>
+        <form onSubmit={joinRoomNow} className="space-y-5">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-[#526056] uppercase tracking-wider">
+              Room Code / Key:
+            </label>
             <input
               type="text"
               placeholder="e.g. X891ABQC"
-              className="input-terminal"
+              className="input-social w-full text-base font-mono uppercase tracking-widest text-center"
               value={roomCode}
               onChange={(e) => setRoomCode(e.target.value)}
+              autoFocus
             />
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-[#EBF2ED] border border-[#D5E0D7] flex items-start gap-2.5">
+            <ShieldCheck className="w-4 h-4 text-[#1C4A2E] shrink-0 mt-0.5" />
+            <p className="text-xs text-[#526056] leading-relaxed">
+              Room codes are case-insensitive. Ensure the host has already created the room and it has not yet expired.
+            </p>
           </div>
 
           <button
             type="submit"
-            className={`btn-terminal w-full py-4 text-lg ${loading ? "opacity-50 cursor-not-allowed" : "bg-[var(--text-color)] text-[var(--bg-color)] hover:bg-transparent hover:text-[var(--text-color)]"}`}
             disabled={loading}
+            className="btn-primary-social w-full py-2.5 text-sm"
           >
-            {loading ? "SYNCHRONIZING..." : "CONNECT"}
+            <span>{loading ? "Verifying Code..." : "Enter Room"}</span>
+            <ArrowRight className="w-4 h-4" />
           </button>
         </form>
 
-        <div className="text-center mt-4">
-          <Link to="/rooms" className="text-xs hover:text-[var(--accent-color)] underline underline-offset-4">
-            [ ABORT_AND_RETURN ]
-          </Link>
-        </div>
       </div>
     </div>
   );

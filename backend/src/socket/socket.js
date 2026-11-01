@@ -32,7 +32,7 @@ export const initSocket = (server) => {
       const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
       const user = await User.findById(decoded._id);
       if(!user){
-throw new ApiError(401 , "Unauthorized")
+        throw new ApiError(401 , "Unauthorized")
       }
       socket.user = user;
       next();
@@ -60,9 +60,9 @@ throw new ApiError(401 , "Unauthorized")
   // Omegle Disconnect Grace Period Tracker (roomCode -> timeoutId)
   const pendingOmegleDisconnects = new Map();
 
-  // Helper function to generate a room code (copied from room controller concept)
+  // Helper function to generate an uppercase room code
   const generateSecureRandomString = (length) => {
-    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let result = '';
     for (let i = 0; i < length; i++) {
         result += characters.charAt(Math.floor(Math.random() * characters.length));
@@ -76,35 +76,56 @@ throw new ApiError(401 , "Unauthorized")
     }
     console.log("⚡ socket connected:", socket.id);
 
-    socket.on("joinRoom", async(roomCode) => {
+    socket.on("joinRoom", async(rawRoomCode) => {
       try {
+        if (!rawRoomCode) return;
+        const roomCode = String(rawRoomCode).trim().toUpperCase();
         const userId = socket.user._id;
-        const room = await Room.findOne({ code: roomCode });
+
+        const room = await Room.findOne({ 
+          $or: [{ code: roomCode }, { code: roomCode.toLowerCase() }] 
+        });
+
         if(!room){
+          socket.emit("roomNotFound", { roomCode });
           throw new ApiError(404 , "Room not found")
         }
+
         const isMember = room.members?.some((m) => m.toString() === userId.toString());
         if(!isMember){
           room.members.push(userId);
           await room.save();
         }
-        socket.join(roomCode);
+
+        socket.join(room.code);
+        if (room.code !== roomCode) {
+          socket.join(roomCode);
+        }
         
         // Cache verified room IDs in socket memory to bypass DB later
         if (!socket.verifiedRooms) socket.verifiedRooms = new Map();
+        socket.verifiedRooms.set(room.code, room._id);
         socket.verifiedRooms.set(roomCode, room._id);
 
         // Cancel pending grace period if reconnecting
-        if (pendingOmegleDisconnects.has(roomCode)) {
-          clearTimeout(pendingOmegleDisconnects.get(roomCode));
+        if (pendingOmegleDisconnects.has(room.code) || pendingOmegleDisconnects.has(roomCode)) {
+          const timerId = pendingOmegleDisconnects.get(room.code) || pendingOmegleDisconnects.get(roomCode);
+          clearTimeout(timerId);
+          pendingOmegleDisconnects.delete(room.code);
           pendingOmegleDisconnects.delete(roomCode);
-          socket.to(roomCode).emit("strangerReconnected", {
+
+          socket.to(room.code).emit("strangerReconnected", {
             message: "Stranger reconnected.",
           });
-          console.log(`⚡ Cancelled grace period for Omegle room ${roomCode} (user reconnected)`);
+          if (room.code !== roomCode) {
+            socket.to(roomCode).emit("strangerReconnected", {
+              message: "Stranger reconnected.",
+            });
+          }
+          console.log(`⚡ Cancelled grace period for Omegle room ${room.code} (user reconnected)`);
         }
 
-        console.log(`✅ socket ${socket.id} joined room ${roomCode}`);
+        console.log(`✅ socket ${socket.id} joined room ${room.code}`);
       } catch (error) {
         socket.emit("error", { message: error?.message || "Failed to join room" });
       }
@@ -112,20 +133,25 @@ throw new ApiError(401 , "Unauthorized")
 
     socket.on("newMessage", async (message) => {
       try {
-        const roomCode = message?.roomCode;
-        const content = message?.content ?? message?.message ?? message?.text;
-
-        if(!roomCode){
+        const rawRoomCode = message?.roomCode;
+        if(!rawRoomCode){
           throw new ApiError(400 , "Room code is required")
         }
+        const roomCode = String(rawRoomCode).trim().toUpperCase();
+        const content = message?.content ?? message?.message ?? message?.text;
+
         if(!content){
           throw new ApiError(400 , "Message content is required")
         }
 
         // Check memory cache first, or self-heal fallback to DB
         let roomId = socket.verifiedRooms?.get(roomCode);
+        let actualRoomCode = roomCode;
+
         if(!roomId){
-          const room = await Room.findOne({ code: roomCode });
+          const room = await Room.findOne({ 
+            $or: [{ code: roomCode }, { code: roomCode.toLowerCase() }] 
+          });
           if(!room){
             throw new ApiError(404 , "Room not found");
           }
@@ -133,11 +159,15 @@ throw new ApiError(401 , "Unauthorized")
             room.members.push(socket.user._id);
             await room.save();
           }
-          socket.join(roomCode);
+          actualRoomCode = room.code;
           if (!socket.verifiedRooms) socket.verifiedRooms = new Map();
+          socket.verifiedRooms.set(actualRoomCode, room._id);
           socket.verifiedRooms.set(roomCode, room._id);
           roomId = room._id;
         }
+
+        // Always ensure sender socket is joined to the room channel
+        socket.join(actualRoomCode);
 
         const newMessage = await Message.create({
           room_id: roomId,
@@ -160,7 +190,10 @@ throw new ApiError(401 , "Unauthorized")
           },
         };
 
-        io.to(roomCode).emit("receiveMessage", populatedMessage);
+        io.to(actualRoomCode).emit("receiveMessage", populatedMessage);
+        if (actualRoomCode !== roomCode) {
+          io.to(roomCode).emit("receiveMessage", populatedMessage);
+        }
 
         // Fire and forget updating the room's last_active
         Room.findByIdAndUpdate(roomId, { last_active: Date.now() }).exec();
@@ -236,6 +269,10 @@ throw new ApiError(401 , "Unauthorized")
           if (!socket.verifiedRooms) socket.verifiedRooms = new Map();
           socket.verifiedRooms.set(room.code, room._id);
 
+          // Immediately join both sockets to the room channel on the server
+          matchedSocket.join(room.code);
+          socket.join(room.code);
+
           // Tell both sockets to join the newly created room
           matchedSocket.emit("strangerMatched", { roomCode: room.code });
           socket.emit("strangerMatched", { roomCode: room.code });
@@ -255,15 +292,26 @@ throw new ApiError(401 , "Unauthorized")
     });
 
     // Leave omegle room — deletes room & notifies the other user immediately (no grace period when manually leaving)
-    socket.on("leaveOmegleRoom", async (roomCode) => {
+    const handleOmegleLeave = async (data) => {
       try {
+        const rawRoomCode = (typeof data === "object" && data !== null) ? data.roomCode : data;
+        if (!rawRoomCode) return;
+        const roomCode = String(rawRoomCode).trim().toUpperCase();
+
         if (pendingOmegleDisconnects.has(roomCode)) {
           clearTimeout(pendingOmegleDisconnects.get(roomCode));
           pendingOmegleDisconnects.delete(roomCode);
         }
 
-        const room = await Room.findOne({ code: roomCode });
+        const room = await Room.findOne({ 
+          $or: [{ code: roomCode }, { code: roomCode.toLowerCase() }] 
+        });
         if (!room) return;
+
+        if (pendingOmegleDisconnects.has(room.code)) {
+          clearTimeout(pendingOmegleDisconnects.get(room.code));
+          pendingOmegleDisconnects.delete(room.code);
+        }
 
         // Delete all messages in this room
         await Message.deleteMany({ room_id: room._id });
@@ -271,21 +319,59 @@ throw new ApiError(401 , "Unauthorized")
         await Room.findByIdAndDelete(room._id);
 
         // Notify everyone else in the room that it's closed
-        socket.to(roomCode).emit("roomClosed", { message: "Stranger has disconnected." });
+        socket.to(room.code).emit("roomClosed", { message: "Stranger has disconnected." });
+        if (room.code !== roomCode) {
+          socket.to(roomCode).emit("roomClosed", { message: "Stranger has disconnected." });
+        }
         
         // Leave the socket.io room
+        socket.leave(room.code);
         socket.leave(roomCode);
 
-        console.log(`🗑️ Omegle room ${roomCode} deleted by ${socket.user.username}`);
+        console.log(`🗑️ Omegle room ${room.code} deleted by ${socket.user.username}`);
       } catch (error) {
         socket.emit("error", { message: error?.message || "Failed to leave room" });
       }
-    });
+    };
+
+    socket.on("leaveOmegleRoom", handleOmegleLeave);
+    socket.on("leaveOmegle", handleOmegleLeave);
 
     // Also handle live typewriter events
     socket.on("typing", (data) => {
-        // data should contain { roomCode, key } or just { roomCode }
-        socket.to(data.roomCode).emit("userTyping", { userId: socket.user._id, username: socket.user.username, key: data.key });
+        const roomCode = data?.roomCode ? String(data.roomCode).trim().toUpperCase() : null;
+        if (!roomCode) return;
+        socket.to(roomCode).emit("userTyping", { userId: socket.user._id, username: socket.user.username, key: data.key });
+        if (data.roomCode && data.roomCode !== roomCode) {
+          socket.to(data.roomCode).emit("userTyping", { userId: socket.user._id, username: socket.user.username, key: data.key });
+        }
+    });
+
+    // Real-time message reaction event
+    socket.on("reactMessage", (data) => {
+      try {
+        const { roomCode, messageId, emoji } = data || {};
+        if (!roomCode || !messageId || !emoji) return;
+        const normalizedCode = String(roomCode).trim().toUpperCase();
+
+        io.to(normalizedCode).emit("messageReaction", {
+          messageId,
+          emoji,
+          userId: socket.user._id.toString(),
+          username: socket.user.username,
+        });
+
+        if (data.roomCode && data.roomCode !== normalizedCode) {
+          io.to(data.roomCode).emit("messageReaction", {
+            messageId,
+            emoji,
+            userId: socket.user._id.toString(),
+            username: socket.user.username,
+          });
+        }
+      } catch (err) {
+        console.error("Error broadcasting reaction:", err);
+      }
     });
 
     socket.on("disconnect", async () => {

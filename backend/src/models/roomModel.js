@@ -6,6 +6,8 @@ const roomSchema = new Schema({
         required:true,
         unique:true,
         index:true,
+        uppercase:true,
+        trim:true,
     },
     created_by:{
         type:mongoose.Schema.Types.ObjectId,
@@ -36,4 +38,3 @@ expires_at: {
 // This tells MongoDB to automatically delete the document when the current time hits expires_at
 roomSchema.index({ expires_at: 1 }, { expireAfterSeconds: 0 });
 export const Room  = mongoose.model("Room" , roomSchema);
-
